@@ -6,31 +6,31 @@ import (
 
 var respCache = make(map[string]bool)
 
-func (manager *Manager[CTX]) initResponse() error {
+func (manager *Manager) initResponse() error {
 	return manager.D.Table("__resp").AutoMigrate(&BotResponseConfig{})
 }
 
-func (manager *Manager[CTX]) Response(gid string) error {
+func (manager *Manager) Response(gid string) error {
 	if manager.CanResponse(gid) {
-		return fmt.Errorf("group-%s is already response", gid)
+		return fmt.Errorf("wxid-[%s] is already response", gid)
 	}
 	manager.Lock()
 	defer manager.Unlock()
 	respCache[gid] = true
-	return manager.D.Table("__resp").Create(&BotResponseConfig{GroupID: gid}).Error
+	return manager.D.Table("__resp").Where("gid = ?", gid).Delete(&BotResponseConfig{}).Error
 }
 
-func (manager *Manager[CTX]) Silence(gid string) error {
+func (manager *Manager) Silence(gid string) error {
 	if !manager.CanResponse(gid) {
-		return fmt.Errorf("group-%s is already silence", gid)
+		return fmt.Errorf("wxid-[%s] is already silence", gid)
 	}
 	manager.Lock()
 	defer manager.Unlock()
 	respCache[gid] = false
-	return manager.D.Table("__resp").Where("gid = ?", gid).Delete(&BotResponseConfig{}).Error
+	return manager.D.Table("__resp").Create(&BotResponseConfig{GroupID: gid, Status: false}).Error
 }
 
-func (manager *Manager[CTX]) CanResponse(gid string) bool {
+func (manager *Manager) CanResponse(gid string) bool {
 	manager.RLock()
 	isResp, ok := respCache["all"]
 	manager.RUnlock()

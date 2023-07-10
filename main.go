@@ -1,59 +1,51 @@
 package main
 
 import (
+	"time"
+
 	"github.com/spf13/viper"
 	"github.com/yqchilde/wxbot/engine/pkg/log"
+	"github.com/yqchilde/wxbot/engine/pkg/net"
 	"github.com/yqchilde/wxbot/engine/robot"
-	"github.com/yqchilde/wxbot/framework/qianxun"
+	"github.com/yqchilde/wxbot/framework/dean"
 	"github.com/yqchilde/wxbot/framework/vlw"
 
-	// 导入插件
-	_ "github.com/yqchilde/wxbot/plugins/baidubaike"   // 百度百科
-	_ "github.com/yqchilde/wxbot/plugins/chatgpt"      // GPT聊天
-	_ "github.com/yqchilde/wxbot/plugins/crazykfc"     // 肯德基疯狂星期四骚话
-	_ "github.com/yqchilde/wxbot/plugins/jingdong"     // 京豆上车
-	_ "github.com/yqchilde/wxbot/plugins/manager"      // 群组管理相关
-	_ "github.com/yqchilde/wxbot/plugins/memepicture"  // 表情包原图
-	_ "github.com/yqchilde/wxbot/plugins/moyuban"      // 摸鱼办
-	_ "github.com/yqchilde/wxbot/plugins/pinyinsuoxie" // 拼音缩写翻译
-	_ "github.com/yqchilde/wxbot/plugins/plmm"         // 漂亮妹妹
-	_ "github.com/yqchilde/wxbot/plugins/weather"      // 天气查询
-	_ "github.com/yqchilde/wxbot/plugins/zaobao"       // 每日早报
+	// 导入插件, 变更插件请查看README
+	_ "github.com/yqchilde/wxbot/engine/plugins"
 )
 
 func main() {
-	// 初始化配置
 	v := viper.New()
 	v.SetConfigFile("config.yaml")
 	if err := v.ReadInConfig(); err != nil {
 		log.Fatalf("[main] 读取配置文件失败: %s", err.Error())
 	}
-	var c robot.Config
-	if err := v.Unmarshal(&c); err != nil {
+	c := robot.NewConfig()
+	if err := v.Unmarshal(c); err != nil {
 		log.Fatalf("[main] 解析配置文件失败: %s", err.Error())
 	}
 
-	// 初始化机器人
-	if v.GetString("frameworks.name") == "" {
-		log.Fatalf("[main] 未配置机器人框架")
-	}
-	switch v.GetString("frameworks.name") {
-	case "qianxun":
-		c.Framework = robot.IFramework(qianxun.New(
-			v.GetString("botWxId"),
-			v.GetString("frameworks.apiUrl"),
-			v.GetString("frameworks.apiToken"),
-			v.GetUint("frameworks.servePort"),
-		))
-	case "vlw":
-		c.Framework = robot.IFramework(vlw.New(
-			v.GetString("botWxId"),
-			v.GetString("frameworks.apiUrl"),
-			v.GetString("frameworks.apiToken"),
-			v.GetUint("frameworks.servePort"),
-		))
+	f := robot.IFramework(nil)
+	switch c.Framework.Name {
+	case "Dean":
+		f = robot.IFramework(dean.New(c.BotWxId, c.Framework.ApiUrl, c.Framework.ApiToken))
+		if ipPort, err := net.CheckoutIpPort(c.Framework.ApiUrl); err == nil {
+			if ping := net.PingConn(ipPort, time.Second*10); !ping {
+				c.SetConnHookStatus(false)
+				log.Warn("[main] 无法连接Dean框架，网络无法Ping通，请检查网络")
+			}
+		}
+	case "VLW", "vlw":
+		f = robot.IFramework(vlw.New(c.BotWxId, c.Framework.ApiUrl, c.Framework.ApiToken))
+		if ipPort, err := net.CheckoutIpPort(c.Framework.ApiUrl); err == nil {
+			if ping := net.PingConn(ipPort, time.Second*10); !ping {
+				c.SetConnHookStatus(false)
+				log.Warn("[main] 无法连接到VLW框架，网络无法Ping通，请检查网络")
+			}
+		}
 	default:
-		log.Fatalf("[main] 未知机器人框架: %s", v.GetString("frameworks.name"))
+		log.Fatalf("[main] 请在配置文件中指定机器人框架后再启动")
 	}
-	robot.Run(&c)
+
+	robot.Run(c, f)
 }

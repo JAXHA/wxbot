@@ -1,11 +1,12 @@
 package log
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path"
 	"runtime"
-	"strings"
+	"strconv"
 
 	"github.com/sirupsen/logrus"
 )
@@ -20,19 +21,25 @@ var log = &logger{
 	l: logrus.New(),
 }
 
-type Formatter struct{}
-
-func (s *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
-	timestamp := entry.Time.Format("2006-01-02 15:04:05")
-	level := strings.ToUpper(entry.Level.String())
-	msg := fmt.Sprintf("[%s] [%-5s] [%s:%d] %s\n", timestamp, level, log.callerFile, log.callerLine, entry.Message)
-	return []byte(msg), nil
-}
-
 func init() {
 	log.l.SetLevel(logrus.TraceLevel)
 	log.l.SetOutput(os.Stdout)
-	log.l.SetFormatter(&Formatter{})
+	log.l.SetReportCaller(true)
+	log.l.SetFormatter(&logrus.TextFormatter{
+		ForceColors:     true,
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05",
+		CallerPrettyfier: func(frame *runtime.Frame) (function string, file string) {
+			if os.Getenv("DEBUG") == "true" || os.Getenv("DEBUG_LOG") == "true" {
+				return "", fmt.Sprintf("[%s:%d] [GOID:%d]", log.callerFile, log.callerLine, getGoId())
+			}
+			return "", ""
+		},
+	})
+}
+
+func GetLogger() *logrus.Logger {
+	return log.l
 }
 
 func getCaller() {
@@ -112,4 +119,13 @@ func Trace(args ...interface{}) {
 func Tracef(format string, args ...interface{}) {
 	getCaller()
 	log.l.Tracef(format, args...)
+}
+
+func getGoId() uint64 {
+	b := make([]byte, 64)
+	b = b[:runtime.Stack(b, false)]
+	b = bytes.TrimPrefix(b, []byte("goroutine "))
+	b = b[:bytes.IndexByte(b, ' ')]
+	n, _ := strconv.ParseUint(string(b), 10, 64)
+	return n
 }

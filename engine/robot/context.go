@@ -1,17 +1,21 @@
 package robot
 
 import (
+	"regexp"
+	"strings"
 	"sync"
 )
 
 type Ctx struct {
 	matcher   *Matcher
+	Bot       *Bot
 	Event     *Event
 	State     State
 	framework IFramework
 
 	// lazy message
 	once    sync.Once
+	mutex   sync.Mutex
 	message string
 }
 
@@ -23,8 +27,19 @@ func (ctx *Ctx) GetMatcher() *Matcher {
 // MessageString 字符串消息便于Regex
 func (ctx *Ctx) MessageString() string {
 	ctx.once.Do(func() {
-		if ctx.Event != nil {
-			ctx.message = ctx.Event.Message.Content
+		if ctx.Event != nil && ctx.IsText() {
+			if !ctx.IsAt() || ctx.IsEventPrivateChat() {
+				ctx.message = ctx.Event.Message.Content
+			} else {
+				switch bot.config.Framework.Name {
+				case "Dean":
+					ctx.message = strings.TrimPrefix(ctx.Event.Message.Content, "@"+bot.self.Nick)
+					ctx.message = strings.TrimSpace(ctx.message)
+				case "VLW", "vlw":
+					regex := regexp.MustCompile(`\[at=.*\]\s*`)
+					ctx.message = regex.ReplaceAllString(ctx.Event.Message.Content, "")
+				}
+			}
 		}
 	})
 	return ctx.message

@@ -1,6 +1,7 @@
 package robot
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"runtime/debug"
@@ -10,23 +11,18 @@ import (
 )
 
 var (
-	BotConfig   *Config      // 机器人配置
+	bot         *Bot         // 当前机器人
 	eventBuffer *EventBuffer // 事件缓冲区
 )
 
-type Config struct {
-	BotWxId        string        // 机器人微信ID
-	BotNickname    string        // 机器人名称
-	SuperUsers     []string      // 超级用户(管理员)
-	CommandPrefix  string        // 管理员触发命令
-	BufferLen      uint          // 事件缓冲区长度, 默认4096
-	Latency        time.Duration // 事件处理延迟 (延迟 latency + (0~100ms) 再处理事件) (默认1s)
-	MaxProcessTime time.Duration // 事件最大处理时间 (默认3min)
-	Framework      IFramework    // 接入框架需实现该接口
+type Bot struct {
+	self      *Self
+	config    *Config
+	framework IFramework
 }
 
-// Run 主函数，启动机器人
-func Run(c *Config) {
+// Run 运行并阻塞主线程，等待事件
+func Run(c *Config, f IFramework) {
 	if c.BufferLen == 0 {
 		c.BufferLen = 4096
 	}
@@ -36,15 +32,34 @@ func Run(c *Config) {
 	if c.MaxProcessTime == 0 {
 		c.MaxProcessTime = time.Minute * 3
 	}
-	BotConfig = c
-	eventBuffer = NewEventBuffer(c.BufferLen)
-	eventBuffer.Loop(c.Latency, c.MaxProcessTime, processEventAsync)
+	if c.ServerPort == 0 {
+		c.ServerPort = 9528
+	}
+
+	bot = &Bot{config: c, framework: f}
+	bot.self = &Self{bot: bot, User: &User{}}
+	if c.connHookStatus {
+		bot.self.Init()
+		for i := range c.SuperUsers {
+			if bot.self.friends.GetByWxId(c.SuperUsers[i]) == nil {
+				log.Warnf("[robot] 您设置的管理员[%s]并不是您的好友，请修改config.yaml", c.SuperUsers[i])
+			}
+		}
+
+		log.Printf("[robot] 共获取到%d个好友", bot.self.friends.Count())
+		log.Printf("[robot] 共获取到%d个群组", bot.self.groups.Count())
+		log.Printf("[robot] 共获取到%d个公众号", bot.self.mps.Count())
+	}
 	log.Printf("[robot] 机器人%s开始工作", c.BotNickname)
-	c.Framework.Callback(eventBuffer.ProcessEvent)
+
+	eventBuffer = NewEventBuffer(bot.config.BufferLen)
+	eventBuffer.Loop(bot.config.Latency, bot.config.MaxProcessTime, processEventAsync)
+	runServer(c)
 }
 
 func processEventAsync(event *Event, framework IFramework, maxWait time.Duration) {
 	ctx := &Ctx{
+		Bot:       bot,
 		State:     State{},
 		Event:     event,
 		framework: framework,
@@ -56,7 +71,7 @@ func processEventAsync(event *Event, framework IFramework, maxWait time.Duration
 		hasMatcherListChanged = false
 	}
 	matcherLock.Unlock()
-	preProcessMessageEvent(event)
+	preProcessMessageEvent(ctx, event)
 	go match(ctx, matcherListForRanging, maxWait)
 }
 
@@ -118,7 +133,6 @@ loop:
 							t.Reset(maxWait)
 							continue
 						}
-						log.Debug("[robot] preHandler处理达到最大时延, 退出")
 						break loop
 					}
 					break
@@ -142,7 +156,6 @@ loop:
 						t.Reset(maxWait)
 						continue
 					}
-					log.Debug("[robot] rule处理达到最大时延, 退出")
 					break loop
 				}
 				break
@@ -166,7 +179,6 @@ loop:
 							t.Reset(maxWait)
 							continue
 						}
-						log.Debug("[robot] midHandler处理达到最大时延, 退出")
 						break loop
 					}
 					break
@@ -184,7 +196,6 @@ loop:
 						t.Reset(maxWait)
 						continue
 					}
-					log.Debug("[robot] Handler处理达到最大时延, 退出")
 					break loop
 				}
 				break
@@ -205,7 +216,6 @@ loop:
 							t.Reset(maxWait)
 							continue
 						}
-						log.Warn("[robot] postHandler处理达到最大时延, 退出")
 						break loop
 					}
 					break
@@ -219,30 +229,135 @@ loop:
 }
 
 // preProcessMessageEvent 预处理消息事件
-func preProcessMessageEvent(e *Event) {
+func preProcessMessageEvent(ctx *Ctx, e *Event) {
 	switch e.Type {
 	case EventPrivateChat:
-		log.Println(fmt.Sprintf("收到私聊(%s)消息 ==> %v", e.FromWxId, e.Message.Content))
+		if ctx.IsReference() {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s])引用消息 ==> %v", e.FromName, e.FromWxId, e.Message.Content))
+		} else if ctx.IsText() {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s])文本消息 ==> %v", e.FromName, e.FromWxId, e.Message.Content))
+		} else if ctx.IsImage() {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s]图片消息 ==> %v", e.FromName, e.FromWxId, e.Message.Content))
+		} else if ctx.IsVoice() {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s])语音消息", e.FromName, e.FromWxId))
+		} else if ctx.IsShareCard() {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s])名片消息", e.FromName, e.FromWxId))
+		} else if ctx.IsVideo() {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s])视频消息", e.FromName, e.FromWxId))
+		} else if ctx.IsMemePictures() {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s])动态表情消息", e.FromName, e.FromWxId))
+		} else if ctx.IsLocation() {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s])地理位置消息", e.FromName, e.FromWxId))
+		} else if ctx.IsApp() {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s])应用消息", e.FromName, e.FromWxId))
+		} else {
+			log.Println(fmt.Sprintf("[回调]收到私聊(%s[%s])未整理消息 ==> %v", e.FromName, e.FromWxId, e.Message.Content))
+		}
 	case EventGroupChat:
-		log.Println(fmt.Sprintf("收到群聊(%s[%s])消息 ==> %v", e.FromGroup, e.FromWxId, e.Message.Content))
+		if ctx.IsReference() {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])引用消息 ==> %v", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId, e.Message.Content))
+		} else if ctx.IsText() {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])文本消息 ==> %v", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId, e.Message.Content))
+		} else if ctx.IsImage() {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])图片消息 ==> %v", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId, e.Message.Content))
+		} else if ctx.IsVoice() {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])语音消息", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId))
+		} else if ctx.IsShareCard() {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])名片消息", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId))
+		} else if ctx.IsVideo() {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])视频消息", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId))
+		} else if ctx.IsMemePictures() {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])动态表情消息", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId))
+		} else if ctx.IsLocation() {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])地理位置消息", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId))
+		} else if ctx.IsApp() {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])应用消息", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId))
+		} else {
+			log.Println(fmt.Sprintf("[回调]收到群聊(%s[%s])>用户(%s[%s])未整理消息 ==> %v", e.FromGroupName, e.FromGroup, e.FromName, e.FromWxId, e.Message.Content))
+		}
+	case EventMPChat:
+		log.Println(fmt.Sprintf("[回调]收到订阅公众号(%s[%s])消息", e.FromName, e.FromWxId))
+	case EventSelfMessage:
+		log.Println(fmt.Sprintf("[回调]收到自己发送的消息 ==> %v", e.Message.Content))
 	case EventFriendVerify:
-		log.Println(fmt.Sprintf("收到好友验证消息, wxId:%s, nick:%s, content:%s", e.FriendVerify.WxId, e.FriendVerify.Nick, e.FriendVerify.Content))
+		log.Println(fmt.Sprintf("[回调]收到好友验证消息, wxId:%s, nick:%s, content:%s", e.FriendVerifyMessage.WxId, e.FriendVerifyMessage.Nick, e.FriendVerifyMessage.Content))
+	case EventTransfer:
+		if len(e.TransferMessage.Memo) > 0 {
+			log.Println(fmt.Sprintf("[回调]收到转账消息, wxId:%s, money:%s, memo:%s", e.TransferMessage.FromWxId, e.TransferMessage.Money, e.TransferMessage.Memo))
+		} else {
+			log.Println(fmt.Sprintf("[回调]收到转账消息, wxId:%s, money:%s", e.TransferMessage.FromWxId, e.TransferMessage.Money))
+		}
+	case EventMessageWithdraw:
+		if e.WithdrawMessage.FromType == 1 {
+			log.Println(fmt.Sprintf("[回调]收到撤回私聊(%s)消息", e.WithdrawMessage.FromWxId))
+		} else if e.WithdrawMessage.FromType == 2 {
+			log.Println(fmt.Sprintf("[回调]收到撤回群聊(%s[%s])消息", e.WithdrawMessage.FromGroup, e.WithdrawMessage.FromWxId))
+		}
+	case EventSystem:
+		log.Println(fmt.Sprintf("[回调]收到系统消息 ==> %s", e.Message.Content))
 	}
 }
 
-// GetCTX 获取当前系统中的CTX
-func GetCTX() *Ctx {
+// GetCtx 获取当前系统中的CTX
+func GetCtx() *Ctx {
 	t := time.NewTimer(3 * time.Minute)
 	for {
 		select {
 		case <-t.C:
 			log.Fatal("[robot] 获取CTX超时")
 		default:
-			if BotConfig != nil {
-				t.Stop()
-				return &Ctx{framework: BotConfig.Framework}
+			if bot == nil {
+				time.Sleep(time.Second)
+				continue
 			}
-			time.Sleep(time.Second)
+			if bot.framework == nil {
+				time.Sleep(time.Second)
+				continue
+			}
+			t.Stop()
+			return &Ctx{framework: bot.framework}
 		}
 	}
+}
+
+// GetBot 获取机器人本身
+func GetBot() *Bot {
+	return bot
+}
+
+// GetConfig 获取机器人配置
+func (b *Bot) GetConfig() *Config {
+	return b.config
+}
+
+// Friends 从缓存中获取好友列表
+func (b *Bot) Friends() Friends {
+	return b.self.friends
+}
+
+// Groups 从缓存中获取群列表
+func (b *Bot) Groups() Groups {
+	return b.self.groups
+}
+
+// MPs 从缓存中获取公众号列表
+func (b *Bot) MPs() MPs {
+	return b.self.mps
+}
+
+// Users 从缓存中获取所有用户列表
+func (b *Bot) Users() []*User {
+	var users []*User
+	users = append(users, b.self.friends.AsUsers()...)
+	users = append(users, b.self.groups.AsUsers()...)
+	users = append(users, b.self.mps.AsUsers()...)
+	return users
+}
+
+// GetSelf 获取Self对象，Self对象包含了对用户、群、公众号的包装
+func (b *Bot) GetSelf() (*Self, error) {
+	if b.self == nil {
+		return nil, errors.New("bot self is nil")
+	}
+	return b.self, nil
 }

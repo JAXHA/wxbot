@@ -16,9 +16,12 @@ var sentence []string
 func init() {
 	go getCrazyKFCSentence()
 	rand.Seed(time.Now().UnixNano())
-	engine := control.Register("kfccrazy", &control.Options[*robot.Ctx]{
+	engine := control.Register("kfccrazy", &control.Options{
 		Alias: "kfc骚话",
-		Help:  "输入 {kfc骚话} => 获取肯德基疯狂星期四骚话",
+		Help: "描述:\n" +
+			"奇怪的网友编了一些奇怪的骚话，让我们一起看看吧\n\n" +
+			"指令:\n" +
+			"* kfc骚话 -> 获取肯德基疯狂星期四骚话",
 	})
 
 	engine.OnFullMatch("kfc骚话").SetBlock(true).Handle(func(ctx *robot.Ctx) {
@@ -40,7 +43,7 @@ type apiResponse struct {
 
 func getCrazyKFCSentence() {
 	var data []apiResponse
-	api := "https://raw.fastgit.org/Nthily/KFC-Crazy-Thursday/main/kfc.json"
+	api := "https://jsdelivr.b-cdn.net/gh/whitescent/KFC-Crazy-Thursday@main/kfc.json"
 	if err := req.C().Get(api).Do().Into(&data); err != nil {
 		log.Errorf("kfc骚话获取失败: %v", err)
 		return

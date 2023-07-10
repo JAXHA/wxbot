@@ -3,10 +3,13 @@ package robot
 const (
 	EventGroupChat           = "EventGroupChat"           // 群聊消息事件
 	EventPrivateChat         = "EventPrivateChat"         // 私聊消息事件
+	EventMPChat              = "EventMPChat"              // 公众号消息事件
+	EventSelfMessage         = "EventSelfMessage"         // 自己发的消息事件
 	EventFriendVerify        = "EventFriendVerify"        // 好友请求事件
+	EventTransfer            = "EventTransfer"            // 好友转账事件
 	EventMessageWithdraw     = "EventMessageWithdraw"     // 消息撤回事件
-	EventGroupNameChange     = "EventGroupNameChange"     // 群名称变动事件
-	EventGroupMemberAdd      = "EventGroupMemberAdd"      // 群成员增加事件
+	EventSystem              = "EventSystem"              // 系统消息事件
+	EventGroupMemberIncrease = "EventGroupMemberIncrease" // 群成员增加事件
 	EventGroupMemberDecrease = "EventGroupMemberDecrease" // 群成员减少事件
 	EventInvitedInGroup      = "EventInvitedInGroup"      // 被邀请入群事件
 )
@@ -47,7 +50,12 @@ func (ctx *Ctx) IsVideo() bool {
 }
 
 // IsMemePictures 判断消息类型是否为表情包
-func (ctx *Ctx) IsMemePictures() (string, bool) {
+func (ctx *Ctx) IsMemePictures() bool {
+	return ctx.Event.Message != nil && ctx.Event.Message.Type == MsgTypeMemePicture
+}
+
+// GetMemePictures 获取表情包图片地址
+func (ctx *Ctx) GetMemePictures() (string, bool) {
 	if ctx.Event.Message != nil && ctx.Event.Message.Type != MsgTypeMemePicture {
 		return "", false
 	}
@@ -81,7 +89,7 @@ func (ctx *Ctx) IsRecalled() bool {
 
 // IsReference 判断消息类型是否是消息引用
 func (ctx *Ctx) IsReference() bool {
-	return ctx.Event.Message != nil && ctx.Event.Message.Type == MsgTypeReference
+	return ctx.Event.Message != nil && ctx.Event.ReferenceMessage != nil
 }
 
 // IsAt 判断是否被@了，仅在群聊中有效，私聊也算被@了
@@ -99,7 +107,17 @@ func (ctx *Ctx) IsEventGroupChat() bool {
 	return ctx.Event.Type == EventGroupChat
 }
 
+// IsEventSelfMessage 判断消息是否是机器人自己发出的消息
+func (ctx *Ctx) IsEventSelfMessage() bool {
+	return ctx.Event.Type == EventSelfMessage
+}
+
 // IsEventFriendVerify 判断消息是否是好友请求消息
 func (ctx *Ctx) IsEventFriendVerify() bool {
 	return ctx.Event.Type == EventFriendVerify
+}
+
+// IsEventSubscription 判断消息是否是订阅消息
+func (ctx *Ctx) IsEventSubscription() bool {
+	return ctx.Event.Type == EventMPChat
 }

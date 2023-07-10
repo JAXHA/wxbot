@@ -17,11 +17,11 @@ var (
 )
 
 func init() {
-	engine := control.Register("plmm", &control.Options[*robot.Ctx]{
-		Alias:            "漂亮妹妹",
-		Help:             "输入 {漂亮妹妹} => 获取漂亮妹妹",
-		DataFolder:       "plmm",
-		DisableOnDefault: true,
+	engine := control.Register("plmm", &control.Options{
+		Alias: "漂亮妹妹",
+		Help: "指令:\n" +
+			"* 漂亮妹妹 -> 获取漂亮妹妹",
+		DataFolder: "plmm",
 	})
 
 	if err := sqlite.Open(engine.GetDataFolder()+"/plmm.db", &db); err != nil {
@@ -37,9 +37,9 @@ func init() {
 			return
 		}
 
-		if len(plmmUrlStorage) > 50 {
+		if len(plmmUrlStorage) > 0 {
 			if err := ctx.ReplyImage(plmmUrlStorage[0]); err != nil {
-				ctx.ReplyText(err.Error())
+				log.Errorf("[plmm] 发送图片失败: %v", err)
 			}
 			plmmUrlStorage = plmmUrlStorage[1:]
 		} else {
@@ -55,7 +55,7 @@ func init() {
 				plmmUrlStorage = append(plmmUrlStorage, val.ImageUrl)
 			}
 			if err := ctx.ReplyImage(plmmUrlStorage[0]); err != nil {
-				ctx.ReplyText(err.Error())
+				log.Errorf("[plmm] 发送图片失败: %v", err)
 			}
 			plmmUrlStorage = plmmUrlStorage[1:]
 		}

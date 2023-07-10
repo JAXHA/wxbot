@@ -10,9 +10,11 @@ import (
 )
 
 func init() {
-	engine := control.Register("moyu", &control.Options[*robot.Ctx]{
+	engine := control.Register("moyu", &control.Options{
 		Alias: "摸鱼日历",
-		Help:  "输入 {摸鱼日历|摸鱼} => 获取摸鱼办日历",
+		Help: "指令:\n" +
+			"* 摸鱼 -> 获取摸鱼办日历\n" +
+			"* 摸鱼日历 -> 获取摸鱼办日历",
 	})
 	engine.OnFullMatchGroup([]string{"摸鱼日历", "摸鱼"}).SetBlock(true).Handle(func(ctx *robot.Ctx) {
 		if imageUrl := getMoYuBan(); imageUrl == "" {

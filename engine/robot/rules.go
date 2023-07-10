@@ -15,6 +15,9 @@ func PrefixRule(prefixes ...string) Rule {
 		if !ctx.IsText() {
 			return false
 		}
+		if bot.config.WakeUpRequire == "at" && !ctx.IsAt() {
+			return false
+		}
 		msg := ctx.MessageString()
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(msg, prefix) {
@@ -32,6 +35,9 @@ func PrefixRule(prefixes ...string) Rule {
 func SuffixRule(suffixes ...string) Rule {
 	return func(ctx *Ctx) bool {
 		if !ctx.IsText() {
+			return false
+		}
+		if bot.config.WakeUpRequire == "at" && !ctx.IsAt() {
 			return false
 		}
 		msg := ctx.MessageString()
@@ -53,10 +59,10 @@ func CommandRule(commands ...string) Rule {
 		if !ctx.IsText() {
 			return false
 		}
-		if !strings.HasPrefix(ctx.Event.Message.Content, BotConfig.CommandPrefix) {
+		if !strings.HasPrefix(ctx.Event.Message.Content, bot.config.CommandPrefix) {
 			return false
 		}
-		cmdMessage := ctx.Event.Message.Content[len(BotConfig.CommandPrefix):]
+		cmdMessage := ctx.Event.Message.Content[len(bot.config.CommandPrefix):]
 		for _, command := range commands {
 			if strings.HasPrefix(cmdMessage, command) {
 				ctx.State["command"] = command
@@ -76,6 +82,9 @@ func RegexRule(regexPattern string) Rule {
 		if !ctx.IsText() {
 			return false
 		}
+		if bot.config.WakeUpRequire == "at" && !ctx.IsAt() {
+			return false
+		}
 		msg := ctx.MessageString()
 		if matched := regex.FindStringSubmatch(msg); matched != nil {
 			ctx.State["regex_matched"] = matched
@@ -89,6 +98,9 @@ func RegexRule(regexPattern string) Rule {
 func KeywordRule(src ...string) Rule {
 	return func(ctx *Ctx) bool {
 		if !ctx.IsText() {
+			return false
+		}
+		if bot.config.WakeUpRequire == "at" && !ctx.IsAt() {
 			return false
 		}
 		msg := ctx.MessageString()
@@ -108,6 +120,9 @@ func FullMatchRule(src ...string) Rule {
 		if !ctx.IsText() {
 			return false
 		}
+		if bot.config.WakeUpRequire == "at" && !ctx.IsAt() {
+			return false
+		}
 		msg := ctx.MessageString()
 		for _, str := range src {
 			if str == msg {
@@ -121,7 +136,7 @@ func FullMatchRule(src ...string) Rule {
 
 // AdminPermission 只允许系统配置的管理员使用
 func AdminPermission(ctx *Ctx) bool {
-	for _, su := range BotConfig.SuperUsers {
+	for _, su := range bot.config.SuperUsers {
 		if su == ctx.Event.FromWxId {
 			return true
 		}
@@ -131,15 +146,17 @@ func AdminPermission(ctx *Ctx) bool {
 
 // UserOrGroupAdmin 允许用户单独使用或群管使用
 func UserOrGroupAdmin(ctx *Ctx) bool {
-	if ctx.IsEventGroupChat() {
+	if ctx.IsEventPrivateChat() {
+		return true
+	} else if ctx.IsEventGroupChat() {
 		return AdminPermission(ctx)
 	}
-	return true
+	return false
 }
 
 // HasMemePicture 检查消息是否存在表情包图片
 func HasMemePicture(ctx *Ctx) bool {
-	url, has := ctx.IsMemePictures()
+	url, has := ctx.GetMemePictures()
 	if has {
 		ctx.State["image_url"] = url
 		return true
@@ -185,7 +202,12 @@ func OnlyPrivate(ctx *Ctx) bool {
 	return ctx.IsEventPrivateChat()
 }
 
-// OnlyAtMe 只允许@机器人使用
+// OnlyAtMe 只允许@机器人使用，注意这里私聊也是返回true，如仅需群聊，请再加一个OnlyGroup规则
 func OnlyAtMe(ctx *Ctx) bool {
-	return ctx.IsEventGroupChat() && ctx.IsAt()
+	return ctx.IsAt()
+}
+
+// OnlyMe 只允许机器人自己使用
+func OnlyMe(ctx *Ctx) bool {
+	return ctx.IsEventSelfMessage()
 }
